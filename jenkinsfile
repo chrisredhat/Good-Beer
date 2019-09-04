@@ -1,0 +1,209 @@
+def SEC_PASS=0
+def QUA_PASS=0
+def jsonObj
+pipeline {
+    agent {
+        label 'build' 
+    }
+    environment {
+        workingDirectory = "/Users/chris/jenkins-build"
+        project = 'Good-Beer-Demo'
+        ionic = "/usr/local/bin/ionic"
+        group_id = "com.redhat"
+        artifact_id = "demo"
+        version = "1.0.${BUILD_NUMBER}"
+        package_name = "app-release.apk"
+        dev_url = "http://spring-boot-ionic-example-dev.13.94.25.165.nip.io"
+        sit_url = "http://spring-boot-ionic-example-sit.13.94.25.165.nip.io"
+        uat_url = "http://spring-boot-ionic-example-uat.13.94.25.165.nip.io"
+        ANDROID_HOME = '/Users/chris/Library/Android/sdk'
+        GITLAB_URL = 'http://gitlab-ee.13.94.25.165.nip.io/root/good-beer-demo.git'
+        SONAR_PROJECT_KEY = 'good-beers'
+        SONAR_URL = 'https://sqube.rh-internal.tk'
+        SONAR_LOGIN = 'ae8947cf5cc4471fc20c4204753f3136fe1f9e84'
+        NEXUS_VERSION = "nexus3"
+        NEXUS_PROTOCOL = "https"
+        NEXUS_URL = "nexus.rh-internal.tk"
+        NEXUS_REPOSITORY = "good-beers-android"
+        NEXUS_CREDENTIAL_ID = "nexus"
+
+    }
+    stages {
+        stage('Setup Build Work Space') {
+            steps {
+                dir("${workingDirectory}") {
+                    sh "rm -rf ${project}"
+                    sh "mkdir -p ${project}"
+                }
+                dir("${workingDirectory}/${project}") {
+                    git branch: 'master', url: "${GITLAB_URL}" 
+                    sh "gsed -i 's/@@@group_id@@@/${group_id}/' config.xml pom.xml"
+                    sh "gsed -i 's/@@@artifact_id@@@/${artifact_id}/' config.xml pom.xml"
+                    sh "gsed -i 's/@@@version@@@/${version}/' config.xml pom.xml"
+                }
+            }
+        }
+        stage('Build') {
+            steps {
+                dir("${workingDirectory}/${project}") {
+                    sh "./build.sh dev \"${dev_url}\" "
+                    sh "./build.sh sit \"${sit_url}\" "
+                    sh "./build.sh uat \"${uat_url}\" "
+                }
+            }
+        }
+        stage('Code Analysis') {
+            steps {
+                dir("${workingDirectory}/${project}/platforms/android") {
+                    sh 'cp -f build.gradle build.gradle_bak'
+                    sh "../../gsed.sh"
+                    sh "./gradlew sonarqube -Dsonar.projectKey=${SONAR_PROJECT_KEY} -Dsonar.host.url=${SONAR_URL} -Dsonar.login=${SONAR_LOGIN} -x CordovaLib:processDebugAndroidTestManifest"
+                }
+            }
+            post{
+                success {
+                    script{
+                        SEC_PASS=1
+                        //echo "${SEC_PASS}"
+                    }
+                }
+            }
+        }
+        stage('DEV Test') {
+            steps {
+                dir("${workingDirectory}/${project}/test/android") {
+                    sh "ln -sf app/dev/${package_name} ${package_name}"
+                    sh 'rspec main.rb'
+                    sh './shutdown.sh'
+                }
+            }
+            post{
+                success {
+                    script{
+                        QUA_PASS=1
+                        //echo "${QUA_PASS}"
+                    }
+                }
+            }
+        }
+        stage('Upload to Repo') {
+            steps {
+                dir("${workingDirectory}/${project}") {
+                    script {
+                        pom = readMavenPom file: "pom.xml";
+                        artifactPath = "platforms/android/app/build/outputs/apk/release/app-release.apk"
+                        artifactExists = fileExists artifactPath;
+                        if(artifactExists) {
+                            nexusArtifactUploader(
+                                nexusVersion: NEXUS_VERSION,
+                                protocol: NEXUS_PROTOCOL,
+                                nexusUrl: NEXUS_URL,
+                                groupId: pom.groupId,
+                                version: pom.version,
+                                repository: NEXUS_REPOSITORY,
+                                credentialsId: NEXUS_CREDENTIAL_ID,
+                                artifacts: [
+                                    [artifactId: pom.artifactId,
+                                    classifier: '',
+                                    file: artifactPath,
+                                    type: "apk"],
+                                    [artifactId: pom.artifactId,
+                                    classifier: '',
+                                    file: "pom.xml",
+                                    type: "pom"]
+                                ]
+                            );
+                        } else {
+                            error "*** File: ${artifactPath}, could not be found";
+                        }
+                    }
+                }
+                
+
+            }
+            post{
+                success{
+                    sh "if [ ${SEC_PASS} == 1 ]; then curl -u RS7rXnVf:vuLK4eR53KJSNBpTQ39mG31VZJMZZF9ZQonIPyr83SDv -X POST 'https://${NEXUS_URL}/service/rest/v1/tags/associate/DEV_Security_Pass?wait=true&repository=${NEXUS_REPOSITORY}&format=maven2&group=${group_id}&name=${artifact_id}&version=${version}' -H 'accept: application/json'; fi"
+                    sh "if [ ${QUA_PASS} == 1 ]; then curl -u RS7rXnVf:vuLK4eR53KJSNBpTQ39mG31VZJMZZF9ZQonIPyr83SDv -X POST 'https://${NEXUS_URL}/service/rest/v1/tags/associate/DEV_Quality_Pass?wait=true&repository=${NEXUS_REPOSITORY}&format=maven2&group=${group_id}&name=${artifact_id}&version=${version}' -H 'accept: application/json'; fi"
+                }
+            }
+        }
+        stage('SIT-Checking'){
+            steps{
+                script {
+                    sh script: "curl -s -u RS7rXnVf:vuLK4eR53KJSNBpTQ39mG31VZJMZZF9ZQonIPyr83SDv -X GET 'https://${NEXUS_URL}/service/rest/v1/search?repository=${NEXUS_REPOSITORY}&format=maven2&&group=${group_id}&name=${artifact_id}&version=${version}' > test.out"
+                    resultstring =  readFile('test.out').trim()
+                    jsonObj = readJSON text: resultstring
+                    resultstring = "${jsonObj.items.tags}"
+                }
+                echo "Current tags: ${resultstring}"
+                sleep 5
+            }
+        }
+        stage('SIT') {
+            when {
+                allOf{
+                    expression {
+                        (resultstring =~ "DEV_Quality_Pass")
+                    }
+                    expression {
+                        (resultstring =~ "DEV_Security_Pass")
+                    }    
+                }
+            }
+            steps {
+                dir("${workingDirectory}/${project}/test/android") {
+                    sh "ln -sf app/sit/${package_name} ${package_name}"
+                    sh 'rspec main.rb'
+                    sh './shutdown.sh'
+                }
+            }
+            post{
+                success{
+                    sh " curl -u RS7rXnVf:vuLK4eR53KJSNBpTQ39mG31VZJMZZF9ZQonIPyr83SDv -X POST 'https://${NEXUS_URL}/service/rest/v1/tags/associate/SIT_Security_Pass?wait=true&repository=${NEXUS_REPOSITORY}&format=maven2&group=${group_id}&name=${artifact_id}&version=${version}' -H 'accept: application/json' "
+                    sh " curl -u RS7rXnVf:vuLK4eR53KJSNBpTQ39mG31VZJMZZF9ZQonIPyr83SDv -X POST 'https://${NEXUS_URL}/service/rest/v1/tags/associate/SIT_Quality_Pass?wait=true&repository=${NEXUS_REPOSITORY}&format=maven2&group=${group_id}&name=${artifact_id}&version=${version}' -H 'accept: application/json' "
+                }
+            }
+        }
+        stage('UAT-Checking'){
+            steps{
+                script {
+                    sh script: "curl -s -u RS7rXnVf:vuLK4eR53KJSNBpTQ39mG31VZJMZZF9ZQonIPyr83SDv -X GET 'https://${NEXUS_URL}/service/rest/v1/search?repository=${NEXUS_REPOSITORY}&format=maven2&&group=${group_id}&name=${artifact_id}&version=${version}' > test.out"
+                    resultstring =  readFile('test.out').trim()
+                    jsonObj = readJSON text: resultstring
+                    resultstring = "${jsonObj.items.tags}"
+                }
+                echo "Current tags: ${resultstring}"
+                sleep 5
+            }
+        }
+        
+        stage('UAT') {
+            when {
+                allOf{
+                    expression {
+                        (resultstring =~ "SIT_Quality_Pass")
+                    }
+                    expression {
+                        (resultstring =~ "SIT_Security_Pass")
+                    }    
+                }
+            }
+            steps {
+                input "Deploy to UAT ?"
+                dir("${workingDirectory}/${project}/test/android") {
+                    sh "ln -sf app/uat/${package_name} ${package_name}"
+                    sh 'rspec main.rb'
+                    sh './shutdown.sh'
+                }
+            }
+            post{
+                success{
+                    sh " curl -u RS7rXnVf:vuLK4eR53KJSNBpTQ39mG31VZJMZZF9ZQonIPyr83SDv -X POST 'https://${NEXUS_URL}/service/rest/v1/tags/associate/UAT_Security_Pass?wait=true&repository=${NEXUS_REPOSITORY}&format=maven2&group=${group_id}&name=${artifact_id}&version=${version}' -H 'accept: application/json' "
+                    sh " curl -u RS7rXnVf:vuLK4eR53KJSNBpTQ39mG31VZJMZZF9ZQonIPyr83SDv -X POST 'https://${NEXUS_URL}/service/rest/v1/tags/associate/UAT_Quality_Pass?wait=true&repository=${NEXUS_REPOSITORY}&format=maven2&group=${group_id}&name=${artifact_id}&version=${version}' -H 'accept: application/json' "
+                }
+            }
+
+        }
+    }
+}
