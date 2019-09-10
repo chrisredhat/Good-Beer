@@ -33,7 +33,7 @@ public class AppiumTest {
         caps.setCapability("fullReset", true);
         caps.setCapability("deviceName", device);
         caps.setCapability("avd",device);
-        caps.setCapability("app", "/tmp/app-release.apk");
+        caps.setCapability("app", "app-release.apk");
         caps.setCapability("systemPort", port);
         return caps;
     }
@@ -100,7 +100,7 @@ public class AppiumTest {
         devices.entrySet()
                 .parallelStream()
                 .forEach(entry -> tapNavigationBar(entry.getKey(), entry.getValue()));
-        
+
         /*
         String[] devices = {"Nexus_S_API_26", "Pixel_2_API_26"};
         for (int i = 0; i < devices.length; i++) {

@@ -26,7 +26,8 @@ pipeline {
         NEXUS_URL = "nexus.rh-internal.tk"
         NEXUS_REPOSITORY = "good-beers-android"
         NEXUS_CREDENTIAL_ID = "nexus"
-
+        JIRA_INSTANCE = '68ac51bc-bfeb-4183-9bac-6916af76ca31'
+        JIRA_ANDROID_PROJECT_KEY = 'BEERA'
     }
     stages {
         stage('Setup Build Work Space') {
@@ -71,13 +72,25 @@ pipeline {
         }
         stage('DEV Test') {
             steps {
-                dir("${workingDirectory}/${project}/test/android") {
-                    sh "ln -sf app/dev/${package_name} ${package_name}"
-                    sh 'rspec main.rb'
-                    sh './shutdown.sh'
+                dir("${workingDirectory}/${project}/test/android/appiumtest") {
+                    sh "ln -sf ../app/dev/${package_name} ${package_name}"
+                    // sh 'rspec main.rb'
+                    sh 'mvn test'
                 }
             }
             post{
+                always {
+                    dir("${workingDirectory}/${project}/test/android/appiumtest") {
+                        sh '../shutdown.sh'
+                        step([$class: 'XrayImportBuilder', 
+                        endpointName: '/junit', 
+                        importFilePath: 'target/surefire-reports/*.xml', 
+                        importToSameExecution: 'true', 
+                        testEnvironments: "DEV",
+                        projectKey: "${JIRA_ANDROID_PROJECT_KEY}", 
+                        serverInstance: "${JIRA_INSTANCE}"])
+                    }
+                }
                 success {
                     script{
                         QUA_PASS=1
@@ -125,6 +138,7 @@ pipeline {
                 success{
                     sh "if [ ${SEC_PASS} == 1 ]; then curl -u RS7rXnVf:vuLK4eR53KJSNBpTQ39mG31VZJMZZF9ZQonIPyr83SDv -X POST 'https://${NEXUS_URL}/service/rest/v1/tags/associate/DEV_Security_Pass?wait=true&repository=${NEXUS_REPOSITORY}&format=maven2&group=${group_id}&name=${artifact_id}&version=${version}' -H 'accept: application/json'; fi"
                     sh "if [ ${QUA_PASS} == 1 ]; then curl -u RS7rXnVf:vuLK4eR53KJSNBpTQ39mG31VZJMZZF9ZQonIPyr83SDv -X POST 'https://${NEXUS_URL}/service/rest/v1/tags/associate/DEV_Quality_Pass?wait=true&repository=${NEXUS_REPOSITORY}&format=maven2&group=${group_id}&name=${artifact_id}&version=${version}' -H 'accept: application/json'; fi"
+                    sh 'sleep 5'
                 }
             }
         }
@@ -152,16 +166,29 @@ pipeline {
                 }
             }
             steps {
-                dir("${workingDirectory}/${project}/test/android") {
-                    sh "ln -sf app/sit/${package_name} ${package_name}"
-                    sh 'rspec main.rb'
-                    sh './shutdown.sh'
+                dir("${workingDirectory}/${project}/test/android/appiumtest") {
+                    sh "ln -sf ../app/dev/${package_name} ${package_name}"
+                    // sh 'rspec main.rb'
+                    sh 'mvn test'
                 }
             }
             post{
+                always {
+                    dir("${workingDirectory}/${project}/test/android/appiumtest") {
+                        sh '../shutdown.sh'
+                        step([$class: 'XrayImportBuilder', 
+                        endpointName: '/junit', 
+                        importFilePath: 'target/surefire-reports/*.xml', 
+                        importToSameExecution: 'true', 
+                        testEnvironments: "SIT",
+                        projectKey: "${JIRA_ANDROID_PROJECT_KEY}", 
+                        serverInstance: "${JIRA_INSTANCE}"])
+                    }
+                }
                 success{
                     sh " curl -u RS7rXnVf:vuLK4eR53KJSNBpTQ39mG31VZJMZZF9ZQonIPyr83SDv -X POST 'https://${NEXUS_URL}/service/rest/v1/tags/associate/SIT_Security_Pass?wait=true&repository=${NEXUS_REPOSITORY}&format=maven2&group=${group_id}&name=${artifact_id}&version=${version}' -H 'accept: application/json' "
                     sh " curl -u RS7rXnVf:vuLK4eR53KJSNBpTQ39mG31VZJMZZF9ZQonIPyr83SDv -X POST 'https://${NEXUS_URL}/service/rest/v1/tags/associate/SIT_Quality_Pass?wait=true&repository=${NEXUS_REPOSITORY}&format=maven2&group=${group_id}&name=${artifact_id}&version=${version}' -H 'accept: application/json' "
+                    sh 'sleep 5'
                 }
             }
         }
@@ -191,16 +218,29 @@ pipeline {
             }
             steps {
                 input "Deploy to UAT ?"
-                dir("${workingDirectory}/${project}/test/android") {
-                    sh "ln -sf app/uat/${package_name} ${package_name}"
-                    sh 'rspec main.rb'
-                    sh './shutdown.sh'
+                dir("${workingDirectory}/${project}/test/android/appiumtest") {
+                    sh "ln -sf ../app/dev/${package_name} ${package_name}"
+                    // sh 'rspec main.rb'
+                    sh 'mvn test'
                 }
             }
             post{
+                always {
+                    dir("${workingDirectory}/${project}/test/android/appiumtest") {
+                        sh '../shutdown.sh'
+                        step([$class: 'XrayImportBuilder', 
+                        endpointName: '/junit', 
+                        importFilePath: 'target/surefire-reports/*.xml', 
+                        importToSameExecution: 'true', 
+                        testEnvironments: "UAT",
+                        projectKey: "${JIRA_ANDROID_PROJECT_KEY}", 
+                        serverInstance: "${JIRA_INSTANCE}"])
+                    }
+                }
                 success{
                     sh " curl -u RS7rXnVf:vuLK4eR53KJSNBpTQ39mG31VZJMZZF9ZQonIPyr83SDv -X POST 'https://${NEXUS_URL}/service/rest/v1/tags/associate/UAT_Security_Pass?wait=true&repository=${NEXUS_REPOSITORY}&format=maven2&group=${group_id}&name=${artifact_id}&version=${version}' -H 'accept: application/json' "
                     sh " curl -u RS7rXnVf:vuLK4eR53KJSNBpTQ39mG31VZJMZZF9ZQonIPyr83SDv -X POST 'https://${NEXUS_URL}/service/rest/v1/tags/associate/UAT_Quality_Pass?wait=true&repository=${NEXUS_REPOSITORY}&format=maven2&group=${group_id}&name=${artifact_id}&version=${version}' -H 'accept: application/json' "
+                    sh 'sleep 5'
                 }
             }
 
