@@ -23,7 +23,7 @@ import java.util.concurrent.TimeUnit;
 // This class is a base which is used to start appium service and driver
 public class AppiumTest {
     private static AppiumDriverLocalService service;
-    //public static AndroidDriver[] drivers;
+    private static Hashtable<String, AndroidDriver> drivers = new Hashtable<>();
 
     private static DesiredCapabilities capabilities(String device, int port) {
         // Define Appium Session
@@ -38,6 +38,17 @@ public class AppiumTest {
         return caps;
     }
 
+    private void startDrivers() {
+        String[] devices = {"Nexus_S_API_26", "Pixel_2_API_26"};
+
+        // Start drivers according to number of devices
+        for (int i = 0; i < devices.length; i++) {
+            drivers.put(devices[i], new AndroidDriver(service.getUrl(), capabilities(devices[i], 5000+i)));
+            System.out.println("\nDriver started on device " + devices[i] + "\n");
+            drivers.get(devices[i]).manage().timeouts().implicitlyWait(20, TimeUnit.SECONDS);
+        }
+    }
+
     @Before
     public void startUp() {
         // Start Local Appium Server
@@ -49,63 +60,62 @@ public class AppiumTest {
         }
         else {
             System.out.println("#############\nAppium server started\n#############");
+            startDrivers();
         }
     }
 
     @After
     public void shutdown() {
+        // shutdown drivers and Appium service
+        if (drivers != null) {
+            for (String device : drivers.keySet()) {
+                System.out.println("#############\nTerminate driver on device " + device + "\n#############");
+                drivers.get(device).quit();
+            }
+        }
         if (service != null) {
             System.out.println("#############\nTerminating Appium Service ...\n#############");
             service.stop();
         }
     }
 
-    private static Hashtable<String, String> navigationBar() {
-        Hashtable<String, String> navigation = new Hashtable<>();
-        navigation.put("About", "tab-t0-3");
-        navigation.put("Beer", "tab-t0-1");
-        navigation.put("Contact", "tab-t0-2");
-        navigation.put("Home", "tab-t0-0");
-        return navigation;
-    }
-
-    private void tapNavigationBar(String device, int port) {
-        System.out.println("\nTest Case 1 - Tap page icon on navigation bar\n");
-        Hashtable<String, String> navigation = navigationBar();
-
-        // Start Driver
-        AndroidDriver driver = new AndroidDriver(service.getUrl(), capabilities(device, port));
-        driver.manage().timeouts().implicitlyWait(20, TimeUnit.SECONDS);
-        try {
-            for (String page : navigation.keySet()) {
-                System.out.println("\nGo to " + page + " Page\n");
-                driver.findElement(By.xpath("//*[@resource-id=\"" + navigation.get(page) + "\"]")).click();
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        } finally {
-            System.out.println("#############\nTerminating driver ...\n#############");
-            driver.quit();
-        }
+    private void tapNavigationBar(String page, String resourceID, String device) {
+        System.out.println("\nGo to " + page + " Page on device " + device +"\n");
+        // find element by resource id and perform click action
+        drivers.get(device).findElement(By.xpath("//*[@resource-id=\"" + resourceID + "\"]")).click();
     }
 
     @Test
-    public void executeTest() {
+    public void executeNavigationTest() {
+        System.out.println("\nTest Case 1 - Tap page icon on navigation bar\n");
 
-        Hashtable<String, Integer> devices = new Hashtable<>();
-        devices.put("Pixel_2_API_26", 5001);
-        devices.put("Nexus_S_API_26", 5000);
+        Hashtable<String, String> navigationBar = new Hashtable<>();
+        navigationBar.put("About", "tab-t0-3");
+        navigationBar.put("Beer", "tab-t0-1");
+        navigationBar.put("Contact", "tab-t0-2");
+        navigationBar.put("Home", "tab-t0-0");
 
-
-        devices.entrySet()
+        drivers.entrySet()
                 .parallelStream()
-                .forEach(entry -> tapNavigationBar(entry.getKey(), entry.getValue()));
+                .forEach(entry -> {
+                    for (String page : navigationBar.keySet()) {
+                        tapNavigationBar(page, navigationBar.get(page), entry.getKey());
+                    }
+                });
+    }
 
-        /*
-        String[] devices = {"Nexus_S_API_26", "Pixel_2_API_26"};
-        for (int i = 0; i < devices.length; i++) {
-            tapNavigationBar(devices[i], 5000+i);
-        }
-         */
+    @Test
+    public void executeBeerTest() {
+        System.out.println("\nTest Case 2 - Go to Beer\n");
+
+        Hashtable<String, String> navigationBar = new Hashtable<>();
+        navigationBar.put("About", "tab-t0-3");
+        navigationBar.put("Beer", "tab-t0-1");
+        navigationBar.put("Contact", "tab-t0-2");
+        navigationBar.put("Home", "tab-t0-0");
+
+        drivers.entrySet()
+                .parallelStream()
+                .forEach(entry -> tapNavigationBar("Beer", "tab-t0-1", entry.getKey()));
     }
 }
