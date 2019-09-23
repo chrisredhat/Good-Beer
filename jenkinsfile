@@ -3,11 +3,12 @@ def QUA_PASS=0
 def jsonObj
 pipeline {
     agent {
-        label 'build' 
+        node {
+            label 'build' 
+            customWorkspace '/Users/chris/jenkins-build'
+        }
     }
     environment {
-        workingDirectory = "/Users/chris/jenkins-build"
-        project = 'Good-Beer-Demo'
         ionic = "/usr/local/bin/ionic"
         group_id = "com.redhat"
         artifact_id = "demo"
@@ -17,7 +18,7 @@ pipeline {
         sit_url = "http://spring-boot-ionic-example-sit.13.94.25.165.nip.io"
         uat_url = "http://spring-boot-ionic-example-uat.13.94.25.165.nip.io"
         ANDROID_HOME = '/Users/chris/Library/Android/sdk'
-        GITLAB_URL = 'http://gitlab-ee.13.94.25.165.nip.io/root/good-beer-demo.git'
+        GITLAB_URL = 'https://bitbucket-bitbucket.13.94.25.165.nip.io/scm/demo/good-beer-mobile.git'
         SONAR_PROJECT_KEY = 'good-beers'
         SONAR_URL = 'https://sqube.rh-internal.tk'
         SONAR_LOGIN = 'ae8947cf5cc4471fc20c4204753f3136fe1f9e84'
@@ -32,30 +33,21 @@ pipeline {
     stages {
         stage('Setup Build Work Space') {
             steps {
-                dir("${workingDirectory}") {
-                    sh "rm -rf ${project}"
-                    sh "mkdir -p ${project}"
-                }
-                dir("${workingDirectory}/${project}") {
-                    git branch: 'master', url: "${GITLAB_URL}" 
-                    sh "gsed -i 's/@@@group_id@@@/${group_id}/' config.xml pom.xml"
-                    sh "gsed -i 's/@@@artifact_id@@@/${artifact_id}/' config.xml pom.xml"
-                    sh "gsed -i 's/@@@version@@@/${version}/' config.xml pom.xml"
-                }
+                sh "gsed -i 's/@@@group_id@@@/${group_id}/' config.xml pom.xml"
+                sh "gsed -i 's/@@@artifact_id@@@/${artifact_id}/' config.xml pom.xml"
+                sh "gsed -i 's/@@@version@@@/${version}/' config.xml pom.xml"
             }
         }
         stage('Build') {
             steps {
-                dir("${workingDirectory}/${project}") {
-                    sh "./build.sh dev \"${dev_url}\" "
-                    sh "./build.sh sit \"${sit_url}\" "
-                    sh "./build.sh uat \"${uat_url}\" "
-                }
+                sh "./build.sh dev \"${dev_url}\" "
+                sh "./build.sh sit \"${sit_url}\" "
+                sh "./build.sh uat \"${uat_url}\" "    
             }
         }
         stage('Code Analysis') {
             steps {
-                dir("${workingDirectory}/${project}/platforms/android") {
+                dir("platforms/android") {
                     sh 'cp -f build.gradle build.gradle_bak'
                     sh "../../gsed.sh"
                     sh "./gradlew sonarqube -Dsonar.projectKey=${SONAR_PROJECT_KEY} -Dsonar.host.url=${SONAR_URL} -Dsonar.login=${SONAR_LOGIN} -x CordovaLib:processDebugAndroidTestManifest"
@@ -72,7 +64,7 @@ pipeline {
         }
         stage('DEV Test') {
             steps {
-                dir("${workingDirectory}/${project}/test/android/appiumtest") {
+                dir("test/android/appiumtest") {
                     sh "ln -sf ../app/dev/${package_name} ${package_name}"
                     // sh 'rspec main.rb'
                     sh 'mvn test'
@@ -80,12 +72,12 @@ pipeline {
             }
             post{
                 always {
-                    dir("${workingDirectory}/${project}/test/android/appiumtest") {
+                    dir("test/android/appiumtest") {
                         sh '../shutdown.sh'
                         step([$class: 'XrayImportBuilder', 
                         endpointName: '/junit', 
                         importFilePath: 'target/surefire-reports/*.xml', 
-                        importToSameExecution: 'true', 
+                        importToSameExecution: 'false', 
                         testEnvironments: "DEV",
                         projectKey: "${JIRA_ANDROID_PROJECT_KEY}", 
                         serverInstance: "${JIRA_INSTANCE}"])
@@ -100,39 +92,35 @@ pipeline {
             }
         }
         stage('Upload to Repo') {
-            steps {
-                dir("${workingDirectory}/${project}") {
-                    script {
-                        pom = readMavenPom file: "pom.xml";
-                        artifactPath = "platforms/android/app/build/outputs/apk/release/app-release.apk"
-                        artifactExists = fileExists artifactPath;
-                        if(artifactExists) {
-                            nexusArtifactUploader(
-                                nexusVersion: NEXUS_VERSION,
-                                protocol: NEXUS_PROTOCOL,
-                                nexusUrl: NEXUS_URL,
-                                groupId: pom.groupId,
-                                version: pom.version,
-                                repository: NEXUS_REPOSITORY,
-                                credentialsId: NEXUS_CREDENTIAL_ID,
-                                artifacts: [
-                                    [artifactId: pom.artifactId,
-                                    classifier: '',
-                                    file: artifactPath,
-                                    type: "apk"],
-                                    [artifactId: pom.artifactId,
-                                    classifier: '',
-                                    file: "pom.xml",
-                                    type: "pom"]
-                                ]
-                            );
-                        } else {
-                            error "*** File: ${artifactPath}, could not be found";
-                        }
-                    }
-                }
-                
-
+            steps {               
+               script {
+                  pom = readMavenPom file: "pom.xml";
+                  artifactPath = "platforms/android/app/build/outputs/apk/release/app-release.apk"
+                  artifactExists = fileExists artifactPath;
+                  if(artifactExists) {
+                      nexusArtifactUploader(
+                          nexusVersion: NEXUS_VERSION,
+                          protocol: NEXUS_PROTOCOL,
+                          nexusUrl: NEXUS_URL, 
+                          groupId: pom.groupId,
+                          version: pom.version,
+                          repository: NEXUS_REPOSITORY,
+                          credentialsId: NEXUS_CREDENTIAL_ID,
+                          artifacts: [
+                               [artifactId: pom.artifactId,
+                              classifier: '',
+                              file: artifactPath,
+                              type: "apk"],
+                              [artifactId: pom.artifactId,
+                              classifier: '',
+                              file: "pom.xml",
+                              type: "pom"]
+                          ]
+                      );
+                  } else {
+                      error "*** File: ${artifactPath}, could not be found";
+                  }
+               }                                
             }
             post{
                 success{
@@ -166,7 +154,7 @@ pipeline {
                 }
             }
             steps {
-                dir("${workingDirectory}/${project}/test/android/appiumtest") {
+                dir("test/android/appiumtest") {
                     sh "ln -sf ../app/dev/${package_name} ${package_name}"
                     // sh 'rspec main.rb'
                     sh 'mvn test'
@@ -174,12 +162,12 @@ pipeline {
             }
             post{
                 always {
-                    dir("${workingDirectory}/${project}/test/android/appiumtest") {
+                    dir("test/android/appiumtest") {
                         sh '../shutdown.sh'
                         step([$class: 'XrayImportBuilder', 
                         endpointName: '/junit', 
                         importFilePath: 'target/surefire-reports/*.xml', 
-                        importToSameExecution: 'true', 
+                        importToSameExecution: 'false', 
                         testEnvironments: "SIT",
                         projectKey: "${JIRA_ANDROID_PROJECT_KEY}", 
                         serverInstance: "${JIRA_INSTANCE}"])
@@ -218,7 +206,7 @@ pipeline {
             }
             steps {
                 input "Deploy to UAT ?"
-                dir("${workingDirectory}/${project}/test/android/appiumtest") {
+                dir("test/android/appiumtest") {
                     sh "ln -sf ../app/dev/${package_name} ${package_name}"
                     // sh 'rspec main.rb'
                     sh 'mvn test'
@@ -226,12 +214,12 @@ pipeline {
             }
             post{
                 always {
-                    dir("${workingDirectory}/${project}/test/android/appiumtest") {
+                    dir("test/android/appiumtest") {
                         sh '../shutdown.sh'
                         step([$class: 'XrayImportBuilder', 
                         endpointName: '/junit', 
                         importFilePath: 'target/surefire-reports/*.xml', 
-                        importToSameExecution: 'true', 
+                        importToSameExecution: 'false', 
                         testEnvironments: "UAT",
                         projectKey: "${JIRA_ANDROID_PROJECT_KEY}", 
                         serverInstance: "${JIRA_INSTANCE}"])

@@ -90,7 +90,7 @@ public class AppiumTest {
         System.out.println("\nTest Case 1 - Tap page icon on navigation bar\n");
 
         Hashtable<String, String> navigationBar = new Hashtable<>();
-        navigationBar.put("About", "abctab-t0-3");
+        navigationBar.put("About", "tab-t0-3");
         navigationBar.put("Beer", "tab-t0-1");
         navigationBar.put("Contact", "tab-t0-2");
         navigationBar.put("Home", "tab-t0-0");
@@ -107,7 +107,7 @@ public class AppiumTest {
     @Test
     public void executeBeerTest() {
         System.out.println("\nTest Case 2 - Go to Beer\n");
-        
+
         drivers.entrySet()
                 .parallelStream()
                 .forEach(entry -> tapNavigationBar("Beer", "tab-t0-1", entry.getKey()));
